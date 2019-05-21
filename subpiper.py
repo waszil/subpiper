@@ -2,6 +2,7 @@
 # Target:   Python 3.7
 
 import os
+import sys
 import subprocess
 from threading import Thread
 from queue import Queue
@@ -39,7 +40,9 @@ def subpiper(cmd: str,
 
     :param cmd: command to launch in the subprocess. Passed directly to Popen.
     :param stdout_callback: user callback for capturing the subprocess unbuffered stdout
+                            if None, stdout is printed to sys.stdout
     :param stderr_callback: user callback for capturing the subprocess unbuffered stderr
+                            if None, stderr is printed to sys.stderr
     :param add_path_list: additional path list to add to local PATH
     :return: subprocess return code
     """
@@ -78,10 +81,16 @@ def subpiper(cmd: str,
         eline = '' if err_queue.empty() else err_queue.get_nowait()
 
         # pass them to user callbacks
-        if oline and stdout_callback is not None:
-            stdout_callback(oline)
-        if eline and stderr_callback is not None:
-            stderr_callback(eline)
+        if oline:
+            if stdout_callback is not None:
+                stdout_callback(oline)
+            else:
+                print(oline, file=sys.stdout)
+        if eline:
+            if stderr_callback is not None:
+                stderr_callback(eline)
+            else:
+                print(oline, file=sys.stderr)
 
         # check if the subprocess has finished
         retcode = proc.poll()
