@@ -21,7 +21,8 @@ def subpiper(cmd: str,
              stdout_callback: Callable[[str], None] = None,
              stderr_callback: Callable[[str], None] = None,
              add_path_list: Iterable[str] = (),
-             finished_callback: Callable[[int], None] = None) -> Optional[int]:
+             finished_callback: Callable[[int], None] = None,
+             hide_console: bool = True) -> Optional[int]:
     """
     Launches a subprocess with the specified command, and captures stdout and stderr separately and unbuffered.
     The user can provide callbacks for printing/logging these outputs.
@@ -65,9 +66,10 @@ def subpiper(cmd: str,
     :param add_path_list: additional path list to add to local PATH
     :param finished_callback: if not None, this will be called when the subprocess is finished.
                               In this case this function is non-blocking.
+    :param hide_console: if True, hides new console window
     :return: subprocess return code, if blocking (finished_callback specified), else None.
     """
-    _subpiper = _SubPiper(cmd, stdout_callback, stderr_callback, add_path_list, finished_callback)
+    _subpiper = _SubPiper(cmd, stdout_callback, stderr_callback, add_path_list, finished_callback, hide_console)
     return _subpiper.execute()
 
 
@@ -78,13 +80,15 @@ class _SubPiper:
                  stdout_callback: Callable[[str], None] = None,
                  stderr_callback: Callable[[str], None] = None,
                  add_path_list: Iterable[str] = (),
-                 finished_callback: Callable[[int], None] = None):
+                 finished_callback: Callable[[int], None] = None,
+                 hide_console: bool = True):
 
         self.cmd = cmd
         self.finished_callback = finished_callback
         self.stdout_callback = stdout_callback
         self.stderr_callback = stderr_callback
         self.add_path_list = add_path_list
+        self.hide_console = hide_console
         self.proc = None
         # create queues for stdout and stderr
         self.out_queue = Queue()
@@ -96,10 +100,18 @@ class _SubPiper:
         for add_path in self.add_path_list:
             local_env["PATH"] = rf'{add_path};{local_env["PATH"]}'
 
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            if self.hide_console:
+                # add flag to hide new console window
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
         # open subprocess
         self.proc = subprocess.Popen(self.cmd, env=local_env, shell=False,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     universal_newlines=True)
+                                     universal_newlines=True,
+                                     startupinfo=startupinfo)
         # create and start listener threads for stdout and stderr
         out_listener = Thread(target=self._enqueue_lines, args=(self.proc.stdout, self.out_queue), daemon=True)
         err_listener = Thread(target=self._enqueue_lines, args=(self.proc.stderr, self.err_queue), daemon=True)
@@ -148,7 +160,7 @@ class _SubPiper:
                 if self.stderr_callback is not None:
                     self.stderr_callback(eline)
                 else:
-                    print(oline, file=sys.stderr)
+                    print(eline, file=sys.stderr)
 
             # check if the subprocess has finished
             retcode = self.proc.poll()
