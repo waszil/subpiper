@@ -7,6 +7,7 @@ Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout an
 """
 
 import os
+import platform
 import sys
 import subprocess
 from threading import Thread
@@ -102,11 +103,12 @@ class _SubPiper:
             local_env["PATH"] = rf'{add_path};{local_env["PATH"]}'
 
         startupinfo = None
-        if os.name == 'nt':
+        if platform.system() == 'Windows':
             startupinfo = subprocess.STARTUPINFO()
             if self.hide_console:
                 # add flag to hide new console window
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
         
         # open subprocess
         self.proc = subprocess.Popen(self.cmd, env=local_env, shell=False,
