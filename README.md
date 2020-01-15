@@ -20,11 +20,23 @@ def my_stderr_callback(line: str):
 my_additional_path_list = [r'c:\important_location']
 
 # call subpiper to take care everyting in blocking mode
-retcode = subpiper(cmd='echo magic',
-                   stdout_callback=my_stdout_callback,
-                   stderr_callback=my_stderr_callback,
-                   add_path_list=my_additional_path_list)
+retcode, *_ = subpiper(
+    cmd='echo magic',
+    stdout_callback=my_stdout_callback,
+    stderr_callback=my_stderr_callback,
+    add_path_list=my_additional_path_list
+)
 # blocks until subprocess finishes
+
+# you can get the buffered outputs as list of strings as well, besides the callbacks:
+retcode, so, se = subpiper(
+    cmd='echo magic',
+    stdout_callback=my_stdout_callback,
+    stderr_callback=my_stderr_callback,
+    add_path_list=my_additional_path_list
+)
+print('STD out captured:', '\n'.join(so))
+print('STD err captured:', '\n'.join(se))
 ```
 
 ### Non-blocking mode
@@ -36,11 +48,13 @@ def process_done(retcode: int):
     print(f'Subprocess finished with return code: {retcode}')
 
 # call subpiper to take care everyting in non-blocking mode
-retcode = subpiper(cmd='echo magic',
-                   stdout_callback=my_stdout_callback,
-                   stderr_callback=my_stderr_callback,
-                   add_path_list=my_additional_path_list,
-                   finished_callback=process_done)
+subpiper(
+    cmd='echo magic',
+    stdout_callback=my_stdout_callback,
+    stderr_callback=my_stderr_callback,
+    add_path_list=my_additional_path_list,
+    finished_callback=process_done
+)
 # do your other stuff
 ...
 # when the subprocess finishes, your process_done callback will be invoked.
