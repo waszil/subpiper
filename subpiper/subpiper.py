@@ -12,19 +12,22 @@ import sys
 import subprocess
 from threading import Thread
 from queue import Queue
-from typing import Iterable, Callable, IO, Union, Any, Optional
+from typing import Iterable, Callable, IO, Union, Any, Optional, List, Tuple
 
 _FILE = Union[None, int, IO[Any]]
 
 __all__ = ['subpiper']
 
 
-def subpiper(cmd: str,
-             stdout_callback: Callable[[str], None] = None,
-             stderr_callback: Callable[[str], None] = None,
-             add_path_list: Iterable[str] = (),
-             finished_callback: Callable[[int], None] = None,
-             hide_console: bool = True) -> Optional[int]:
+def subpiper(
+        cmd: str,
+        stdout_callback: Callable[[str], None] = None,
+        stderr_callback: Callable[[str], None] = None,
+        add_path_list: Iterable[str] = (),
+        finished_callback: Callable[[int], None] = None,
+        hide_console: bool = True,
+        silent: bool = False
+    ) -> Optional[Tuple[int, List[str], List[str]]]:
     """
     Launches a subprocess with the specified command, and captures stdout and stderr separately and unbuffered.
     The user can provide callbacks for printing/logging these outputs.
@@ -44,20 +47,24 @@ def subpiper(cmd: str,
         my_additional_path_list = ['c:\\important_location']
 
         # blocking call
-        retcode = subpiper(cmd='echo magic',
-                           stdout_callback=my_stdout_callback,
-                           stderr_callback=my_stderr_callback,
-                           add_path_list=my_additional_path_list)
+        retcode, stdout, stderr = subpiper(
+            cmd='echo magic',
+            stdout_callback=my_stdout_callback,
+            stderr_callback=my_stderr_callback,
+            add_path_list=my_additional_path_list
+        )
 
         # non-blocking call with finished callback
         def finished(retcode: int):
             print(f'subprocess finished with return code {retcode}.')
 
-        retcode = subpiper(cmd='echo magic',
-                           stdout_callback=my_stdout_callback,
-                           stderr_callback=my_stderr_callback,
-                           add_path_list=my_additional_path_list,
-                           finished_callback=finished)
+        subpiper(
+            cmd='echo magic',
+            stdout_callback=my_stdout_callback,
+            stderr_callback=my_stderr_callback,
+            add_path_list=my_additional_path_list,
+            finished_callback=finished
+        )
 
 
     :param cmd: command to launch in the subprocess. Passed directly to Popen.
@@ -69,9 +76,10 @@ def subpiper(cmd: str,
     :param finished_callback: if not None, this will be called when the subprocess is finished.
                               In this case this function is non-blocking.
     :param hide_console: if True, hides new console window
+    :param silent: if True, does not print to the stdout, only buffers.
     :return: subprocess return code, if blocking (finished_callback specified), else None.
     """
-    _subpiper = _SubPiper(cmd, stdout_callback, stderr_callback, add_path_list, finished_callback, hide_console)
+    _subpiper = _SubPiper(cmd, stdout_callback, stderr_callback, add_path_list, finished_callback, hide_console, silent)
     return _subpiper.execute()
 
 
@@ -83,20 +91,24 @@ class _SubPiper:
                  stderr_callback: Callable[[str], None] = None,
                  add_path_list: Iterable[str] = (),
                  finished_callback: Callable[[int], None] = None,
-                 hide_console: bool = True):
+                 hide_console: bool = True,
+                 silent: bool = False):
 
         self.cmd = cmd
+        self._stdout_buffer = []
+        self._stderr_buffer = []
         self.finished_callback = finished_callback
         self.stdout_callback = stdout_callback
         self.stderr_callback = stderr_callback
         self.add_path_list = add_path_list
         self.hide_console = hide_console
+        self.silent = silent
         self.proc = None
         # create queues for stdout and stderr
         self.out_queue = Queue()
         self.err_queue = Queue()
 
-    def execute(self) -> Optional[int]:
+    def execute(self) -> Optional[Tuple[int, List[str], List[str]]]:
         # add user path
         local_env = os.environ.copy()
         for add_path in self.add_path_list:
@@ -125,7 +137,7 @@ class _SubPiper:
             # poll the subprocess and meanwhile get any outputs from the queues,
             # and pass it on to the user callbacks
             retcode = self._wait_for_process()
-            return retcode
+            return retcode, self._stdout_buffer, self._stderr_buffer
         else:
             # start the subprocess in a thread and return immediately.
             wait_thread = Thread(target=self._wait_for_process, daemon=True)
@@ -139,6 +151,9 @@ class _SubPiper:
         Enqueues lines from out to the queue
         """
         for line in iter(out.readline, b''):
+            if isinstance(line, bytes):
+                if hasattr(out, 'encoding'):
+                    line = line.decode(out.encoding)
             queue.put(line.rstrip())
         out.close()
 
@@ -155,15 +170,19 @@ class _SubPiper:
 
             # pass them to user callbacks
             if oline:
+                self._stdout_buffer.append(oline)
                 if self.stdout_callback is not None:
                     self.stdout_callback(oline)
                 else:
-                    print(oline, file=sys.stdout)
+                    if not self.silent:
+                        print(oline, file=sys.stdout)
             if eline:
+                self._stderr_buffer.append(eline)
                 if self.stderr_callback is not None:
                     self.stderr_callback(eline)
                 else:
-                    print(eline, file=sys.stderr)
+                    if not self.silent:
+                        print(eline, file=sys.stderr)
 
             # check if the subprocess has finished
             retcode = self.proc.poll()
