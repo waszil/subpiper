@@ -6,6 +6,7 @@
 Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout and stderr
 """
 
+import time
 import os
 import platform
 import sys
@@ -157,6 +158,31 @@ class _SubPiper:
             queue.put(line.rstrip())
         out.close()
 
+    def _handle_lines(self):
+        """
+        Helper method
+        Gets lines from the queues and handles them
+        """
+        # get lines
+        oline = '' if self.out_queue.empty() else self.out_queue.get_nowait()
+        eline = '' if self.err_queue.empty() else self.err_queue.get_nowait()
+
+        # pass them to user callbacks
+        if oline:
+            self._stdout_buffer.append(oline)
+            if self.stdout_callback is not None:
+                self.stdout_callback(oline)
+            else:
+                if not self.silent:
+                    print(oline, file=sys.stdout)
+        if eline:
+            self._stderr_buffer.append(eline)
+            if self.stderr_callback is not None:
+                self.stderr_callback(eline)
+            else:
+                if not self.silent:
+                    print(eline, file=sys.stderr)
+    
     def _wait_for_process(self) -> int:
         """
         Helper method
@@ -164,29 +190,19 @@ class _SubPiper:
         and passes them to the user callbacks. If the process finishes, calls the finish_callback, if specified.
         """
         while True:
-            # get lines
-            oline = '' if self.out_queue.empty() else self.out_queue.get_nowait()
-            eline = '' if self.err_queue.empty() else self.err_queue.get_nowait()
-
-            # pass them to user callbacks
-            if oline:
-                self._stdout_buffer.append(oline)
-                if self.stdout_callback is not None:
-                    self.stdout_callback(oline)
-                else:
-                    if not self.silent:
-                        print(oline, file=sys.stdout)
-            if eline:
-                self._stderr_buffer.append(eline)
-                if self.stderr_callback is not None:
-                    self.stderr_callback(eline)
-                else:
-                    if not self.silent:
-                        print(eline, file=sys.stderr)
-
+            self._handle_lines()
             # check if the subprocess has finished
             retcode = self.proc.poll()
             if retcode is not None:
+                # before exiting, check if the process put extra lines to the outputs, catch them as well.
+                while True:
+                    time.sleep(0.001)
+                    self._handle_lines()
+                    # no more lines, we can really finish.
+                    if self.out_queue.empty() and self.err_queue.empty():
+                        break
+                    if not any(self.out_queue.queue) or not any(self.err_queue.queue):
+                        break
                 break
 
         if self.finished_callback is not None:
