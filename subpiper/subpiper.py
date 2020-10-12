@@ -130,7 +130,7 @@ class _SubPiper:
         # add user path
         local_env = os.environ.copy()
         for add_path in self.add_path_list:
-            local_env["PATH"] = rf'{add_path};{local_env["PATH"]}'
+            local_env["PATH"] = rf'{add_path}{os.pathsep}{local_env["PATH"]}'
 
         startupinfo = None
         if platform.system() == "Windows":
