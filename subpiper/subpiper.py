@@ -10,6 +10,7 @@ import time
 import os
 import platform
 import sys
+import shlex
 import subprocess
 from threading import Thread
 from queue import Queue
@@ -17,18 +18,18 @@ from typing import Iterable, Callable, IO, Union, Any, Optional, List, Tuple
 
 _FILE = Union[None, int, IO[Any]]
 
-__all__ = ['subpiper']
+__all__ = ["subpiper"]
 
 
 def subpiper(
-        cmd: str,
-        stdout_callback: Callable[[str], None] = None,
-        stderr_callback: Callable[[str], None] = None,
-        add_path_list: Iterable[str] = (),
-        finished_callback: Callable[[int], None] = None,
-        hide_console: bool = True,
-        silent: bool = False
-    ) -> Optional[Tuple[int, List[str], List[str]]]:
+    cmd: Union[str, List[str]],
+    stdout_callback: Callable[[str], None] = None,
+    stderr_callback: Callable[[str], None] = None,
+    add_path_list: Iterable[str] = (),
+    finished_callback: Callable[[int], None] = None,
+    hide_console: bool = True,
+    silent: bool = False,
+) -> Optional[Tuple[int, List[str], List[str]]]:
     """
     Launches a subprocess with the specified command, and captures stdout and stderr separately and unbuffered.
     The user can provide callbacks for printing/logging these outputs.
@@ -80,22 +81,39 @@ def subpiper(
     :param silent: if True, does not print to the stdout, only buffers.
     :return: subprocess return code, if blocking (finished_callback specified), else None.
     """
-    _subpiper = _SubPiper(cmd, stdout_callback, stderr_callback, add_path_list, finished_callback, hide_console, silent)
+    _subpiper = _SubPiper(
+        cmd,
+        stdout_callback,
+        stderr_callback,
+        add_path_list,
+        finished_callback,
+        hide_console,
+        silent,
+    )
     return _subpiper.execute()
 
 
 class _SubPiper:
+    def __init__(
+        self,
+        cmd: Union[str, List[str]],
+        stdout_callback: Callable[[str], None] = None,
+        stderr_callback: Callable[[str], None] = None,
+        add_path_list: Iterable[str] = (),
+        finished_callback: Callable[[int], None] = None,
+        hide_console: bool = True,
+        silent: bool = False,
+    ):
 
-    def __init__(self,
-                 cmd: str,
-                 stdout_callback: Callable[[str], None] = None,
-                 stderr_callback: Callable[[str], None] = None,
-                 add_path_list: Iterable[str] = (),
-                 finished_callback: Callable[[int], None] = None,
-                 hide_console: bool = True,
-                 silent: bool = False):
+        command_split_char = " "
+        if isinstance(cmd, List):
+            _command = cmd
+        elif isinstance(cmd, str):
+            _command = shlex.split(cmd, posix=False)
+        else:
+            raise TypeError("Command must be either str or List[str].")
 
-        self.cmd = cmd
+        self.cmd: List[str] = _command
         self._stdout_buffer = []
         self._stderr_buffer = []
         self.finished_callback = finished_callback
@@ -116,21 +134,34 @@ class _SubPiper:
             local_env["PATH"] = rf'{add_path};{local_env["PATH"]}'
 
         startupinfo = None
-        if platform.system() == 'Windows':
+        if platform.system() == "Windows":
             startupinfo = subprocess.STARTUPINFO()
             if self.hide_console:
                 # add flag to hide new console window
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
-        
+
         # open subprocess
-        self.proc = subprocess.Popen(self.cmd, env=local_env, shell=False,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     universal_newlines=True,
-                                     startupinfo=startupinfo)
+        self.proc = subprocess.Popen(
+            self.cmd,
+            env=local_env,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            startupinfo=startupinfo,
+        )
         # create and start listener threads for stdout and stderr
-        out_listener = Thread(target=self._enqueue_lines, args=(self.proc.stdout, self.out_queue), daemon=True)
-        err_listener = Thread(target=self._enqueue_lines, args=(self.proc.stderr, self.err_queue), daemon=True)
+        out_listener = Thread(
+            target=self._enqueue_lines,
+            args=(self.proc.stdout, self.out_queue),
+            daemon=True,
+        )
+        err_listener = Thread(
+            target=self._enqueue_lines,
+            args=(self.proc.stderr, self.err_queue),
+            daemon=True,
+        )
         out_listener.start()
         err_listener.start()
 
@@ -151,9 +182,9 @@ class _SubPiper:
         Helper method
         Enqueues lines from out to the queue
         """
-        for line in iter(out.readline, b''):
+        for line in iter(out.readline, b""):
             if isinstance(line, bytes):
-                if hasattr(out, 'encoding'):
+                if hasattr(out, "encoding"):
                     line = line.decode(out.encoding)
             queue.put(line.rstrip())
         out.close()
@@ -164,8 +195,8 @@ class _SubPiper:
         Gets lines from the queues and handles them
         """
         # get lines
-        oline = '' if self.out_queue.empty() else self.out_queue.get_nowait()
-        eline = '' if self.err_queue.empty() else self.err_queue.get_nowait()
+        oline = "" if self.out_queue.empty() else self.out_queue.get_nowait()
+        eline = "" if self.err_queue.empty() else self.err_queue.get_nowait()
 
         # pass them to user callbacks
         if oline:
@@ -182,7 +213,7 @@ class _SubPiper:
             else:
                 if not self.silent:
                     print(eline, file=sys.stderr)
-    
+
     def _wait_for_process(self) -> int:
         """
         Helper method
@@ -211,7 +242,7 @@ class _SubPiper:
         return retcode
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import time
     import tempfile
 
@@ -222,53 +253,59 @@ if __name__ == '__main__':
     blocking = False
 
     def my_out_callback(line):
-        print(f'out: {line}')
+        print(f"out: {line}")
 
     def my_err_callback(line):
-        print(f'err: {line}')
+        print(f"err: {line}")
 
     finished = False
 
     def my_finished_callback(retcode):
         global finished
-        print(f'done: {retcode}')
+        print(f"done: {retcode}")
         finished = True
 
-    _mode = 'blocking' if blocking else 'non-blocking'
+    _mode = "blocking" if blocking else "non-blocking"
 
-    print(f'Example run in {_mode} mode\n')
+    print(f"Example run in {_mode} mode\n")
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.bat', delete=False) as temp_batch:
-        temp_batch.write("""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".bat", delete=False
+    ) as temp_batch:
+        temp_batch.write(
+            """
             @echo off
             echo %time%
             sleep 3
             echo some error message to stderr 1>&2
             echo %time%
             exit 1
-        """)
+        """
+        )
 
-    with open(temp_batch.name, 'r'):
-        print('1')
+    with open(temp_batch.name, "r"):
+        print("1")
         time.sleep(0.5)
-        print('2')
+        print("2")
         time.sleep(0.5)
         cbk = None if blocking else my_finished_callback
 
         # call the subprocess with subpiper
-        ret = subpiper(cmd=temp_batch.name,
-                       stdout_callback=my_out_callback,
-                       stderr_callback=my_err_callback,
-                       finished_callback=cbk)
+        ret = subpiper(
+            cmd=temp_batch.name,
+            stdout_callback=my_out_callback,
+            stderr_callback=my_err_callback,
+            finished_callback=cbk,
+        )
 
-        print('ret:', ret)
-        print('3')
+        print("ret:", ret)
+        print("3")
         time.sleep(0.5)
-        print('4')
+        print("4")
         time.sleep(0.5)
         if not blocking:
             while not finished:
-                print('not finished yet')
+                print("not finished yet")
                 time.sleep(0.5)
 
     os.remove(temp_batch.name)
