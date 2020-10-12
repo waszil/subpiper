@@ -1,6 +1,8 @@
 import pytest
 import time
 import sys
+import stat
+import os
 from pathlib import Path
 
 from subpiper import subpiper
@@ -47,6 +49,8 @@ def test_subpiper(blocking: bool):
     else:
         _ext = "sh"
     script = Path(__file__).parent / f"test_script.{_ext}"
+    st = os.stat(script)
+    os.chmod(script, st.st_mode | stat.S_IEXEC)
 
     so_buffer.clear()
     se_buffer.clear()
