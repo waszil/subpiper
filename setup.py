@@ -8,6 +8,9 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 
+here = os.path.abspath(os.path.dirname(__file__))
+
+
 def find_version(*file_paths):
     with codecs.open(os.path.join(here, *file_paths), "r") as fp:
         version_file = fp.read()
