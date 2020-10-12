@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-# https://github.com/waszil/subpiper
-# Target:   Python 3.7
-
 """
 Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout and stderr
 """
