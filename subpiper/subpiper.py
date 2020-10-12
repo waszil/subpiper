@@ -105,7 +105,6 @@ class _SubPiper:
         silent: bool = False,
     ):
 
-        command_split_char = " "
         if isinstance(cmd, List):
             _command = cmd
         elif isinstance(cmd, str):
