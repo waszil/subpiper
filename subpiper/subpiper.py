@@ -1,5 +1,5 @@
 """
-Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout and stderr
+Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout and stderr.
 """
 
 import time
