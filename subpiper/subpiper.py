@@ -4,7 +4,6 @@ Subprocess wrapper for separate, unbuffered capturing / redirecting of stdout an
 
 import time
 import os
-import platform
 import sys
 import shlex
 import subprocess
@@ -13,57 +12,55 @@ from queue import Queue
 from typing import Iterable, Callable, IO, Union, Any, Optional, List, Tuple
 
 _FILE = Union[None, int, IO[Any]]
+CallbackType = Callable[[str], None]
+FinishedCallbackType = Callable[[int], None]
 
 __all__ = ["subpiper"]
 
 
 def subpiper(
     cmd: Union[str, List[str]],
-    stdout_callback: Callable[[str], None] = None,
-    stderr_callback: Callable[[str], None] = None,
+    stdout_callback: Optional[CallbackType] = None,
+    stderr_callback: Optional[CallbackType] = None,
     add_path_list: Iterable[str] = (),
-    finished_callback: Callable[[int], None] = None,
+    finished_callback: Optional[FinishedCallbackType] = None,
     hide_console: bool = True,
     silent: bool = False,
 ) -> Optional[Tuple[int, List[str], List[str]]]:
-    """
-    Launches a subprocess with the specified command, and captures stdout and stderr separately and unbuffered.
+    """Launches a subprocess with the specified command, and captures stdout and stderr separately and unbuffered.
     The user can provide callbacks for printing/logging these outputs.
 
     Example usage:
 
-    .. code-block:: python
-
-        from subpiper import subpiper
-
-        def my_stdout_callback(line: str):
-             print(f'STDOUT: {line}')
-
-        def my_stderr_callback(line: str):
-            print(f'STDERR: {line}')
-
-        my_additional_path_list = ['c:\\important_location']
-
-        # blocking call
-        retcode, stdout, stderr = subpiper(
-            cmd='echo magic',
-            stdout_callback=my_stdout_callback,
-            stderr_callback=my_stderr_callback,
-            add_path_list=my_additional_path_list
-        )
-
-        # non-blocking call with finished callback
-        def finished(retcode: int):
-            print(f'subprocess finished with return code {retcode}.')
-
-        subpiper(
-            cmd='echo magic',
-            stdout_callback=my_stdout_callback,
-            stderr_callback=my_stderr_callback,
-            add_path_list=my_additional_path_list,
-            finished_callback=finished
-        )
-
+        >>> from subpiper import subpiper
+        ...
+        ... def my_stdout_callback(line: str):
+        ...     print(f'STDOUT: {line}')
+        ...
+        ... def my_stderr_callback(line: str):
+        ...     print(f'STDERR: {line}')
+        ...
+        ... my_additional_path_list = ['c:\\important_location']
+        ...
+        ... # blocking call
+        ... retcode, stdout, stderr = subpiper(
+        ...     cmd='echo magic',
+        ...     stdout_callback=my_stdout_callback,
+        ...     stderr_callback=my_stderr_callback,
+        ...     add_path_list=my_additional_path_list
+        ... )
+        ...
+        ... # non-blocking call with finished callback
+        ... def finished(retcode: int):
+        ...     print(f'subprocess finished with return code {retcode}.')
+        ...
+        ... subpiper(
+        ...     cmd='echo magic',
+        ...     stdout_callback=my_stdout_callback,
+        ...     stderr_callback=my_stderr_callback,
+        ...     add_path_list=my_additional_path_list,
+        ...     finished_callback=finished
+        ... )
 
     :param cmd: command to launch in the subprocess. Passed directly to Popen.
     :param stdout_callback: user callback for capturing the subprocess unbuffered stdout.
@@ -93,15 +90,15 @@ class _SubPiper:
     def __init__(
         self,
         cmd: Union[str, List[str]],
-        stdout_callback: Callable[[str], None] = None,
-        stderr_callback: Callable[[str], None] = None,
+        stdout_callback: Optional[CallbackType] = None,
+        stderr_callback: Optional[CallbackType] = None,
         add_path_list: Iterable[str] = (),
-        finished_callback: Callable[[int], None] = None,
+        finished_callback: Optional[FinishedCallbackType] = None,
         hide_console: bool = True,
         silent: bool = False,
     ):
 
-        if isinstance(cmd, List):
+        if isinstance(cmd, list):
             _command = cmd
         elif isinstance(cmd, str):
             _command = shlex.split(cmd, posix=False)
@@ -129,7 +126,7 @@ class _SubPiper:
             local_env["PATH"] = rf'{add_path}{os.pathsep}{local_env["PATH"]}'
 
         startupinfo = None
-        if platform.system() == "Windows":
+        if sys.platform == "win32":
             startupinfo = subprocess.STARTUPINFO()
             if self.hide_console:
                 # add flag to hide new console window
@@ -235,72 +232,3 @@ class _SubPiper:
             self.finished_callback(retcode)
 
         return retcode
-
-
-if __name__ == "__main__":
-    import time
-    import tempfile
-
-    # ---------------------------------------------
-    # example: run in blocking or non-blocking mode
-    # ---------------------------------------------
-    # blocking = True
-    blocking = False
-
-    def my_out_callback(line):
-        print(f"out: {line}")
-
-    def my_err_callback(line):
-        print(f"err: {line}")
-
-    finished = False
-
-    def my_finished_callback(retcode):
-        global finished
-        print(f"done: {retcode}")
-        finished = True
-
-    _mode = "blocking" if blocking else "non-blocking"
-
-    print(f"Example run in {_mode} mode\n")
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".bat", delete=False
-    ) as temp_batch:
-        temp_batch.write(
-            """
-            @echo off
-            echo %time%
-            sleep 3
-            echo some error message to stderr 1>&2
-            echo %time%
-            exit 1
-        """
-        )
-
-    with open(temp_batch.name, "r"):
-        print("1")
-        time.sleep(0.5)
-        print("2")
-        time.sleep(0.5)
-        cbk = None if blocking else my_finished_callback
-
-        # call the subprocess with subpiper
-        ret = subpiper(
-            cmd=temp_batch.name,
-            stdout_callback=my_out_callback,
-            stderr_callback=my_err_callback,
-            finished_callback=cbk,
-        )
-
-        print("ret:", ret)
-        print("3")
-        time.sleep(0.5)
-        print("4")
-        time.sleep(0.5)
-        if not blocking:
-            while not finished:
-                print("not finished yet")
-                time.sleep(0.5)
-
-    os.remove(temp_batch.name)
