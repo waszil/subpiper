@@ -7,7 +7,7 @@ import os
 import sys
 import shlex
 import subprocess
-from threading import Thread
+from threading import Thread, Event
 from queue import Queue
 from typing import Iterable, Callable, IO, Union, Any, Optional, List, Tuple
 
@@ -114,10 +114,13 @@ class _SubPiper:
         self.add_path_list = add_path_list
         self.hide_console = hide_console
         self.silent = silent
-        self.proc = None
+        self.proc: Optional[subprocess.Popen] = None
+        self.out_listener: Optional[Thread] = None
+        self.err_listener: Optional[Thread] = None
         # create queues for stdout and stderr
         self.out_queue = Queue()
         self.err_queue = Queue()
+        self.kill_listener = Event()
 
     def execute(self) -> Optional[Tuple[int, List[str], List[str]]]:
         # add user path
@@ -144,23 +147,26 @@ class _SubPiper:
             startupinfo=startupinfo,
         )
         # create and start listener threads for stdout and stderr
-        out_listener = Thread(
+        self.out_listener = Thread(
             target=self._enqueue_lines,
             args=(self.proc.stdout, self.out_queue),
             daemon=True,
         )
-        err_listener = Thread(
+        self.err_listener = Thread(
             target=self._enqueue_lines,
             args=(self.proc.stderr, self.err_queue),
             daemon=True,
         )
-        out_listener.start()
-        err_listener.start()
+        self.out_listener.start()
+        self.err_listener.start()
 
         if self.finished_callback is None:
             # poll the subprocess and meanwhile get any outputs from the queues,
             # and pass it on to the user callbacks
             retcode = self._wait_for_process()
+            self.kill_listener.set()
+            self.out_listener.join()
+            self.err_listener.join()
             return retcode, self._stdout_buffer, self._stderr_buffer
         else:
             # start the subprocess in a thread and return immediately.
@@ -168,13 +174,14 @@ class _SubPiper:
             wait_thread.start()
             return None
 
-    @staticmethod
-    def _enqueue_lines(out: _FILE, queue: Queue):
+    def _enqueue_lines(self, out: _FILE, queue: Queue):
         """
         Helper method
         Enqueues lines from out to the queue
         """
         for line in iter(out.readline, b""):
+            if self.kill_listener.is_set():
+                break
             if isinstance(line, bytes):
                 if hasattr(out, "encoding"):
                     line = line.decode(out.encoding)
@@ -231,4 +238,7 @@ class _SubPiper:
         if self.finished_callback is not None:
             self.finished_callback(retcode)
 
+        self.kill_listener.set()
+        self.out_listener.join()
+        self.err_listener.join()
         return retcode
